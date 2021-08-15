@@ -1,0 +1,99 @@
+#!/bin/sh
+
+set -e -u -x
+
+TMP=/tmp/build
+NAMESRC=clamav
+NAME=$NAMESRC
+VERSION=0.103.3
+ARCH=$(arch)
+BUILD=1
+EXT=tar.gz
+PKG=$TMP/package-$NAME
+INSTALLDIR=/usr/local
+SLKCFLAGS="-O2 -fPIC"
+NUMJOBS="-j8"
+
+[ $UID -eq 0 ] && { echo you are ROOT; exit 1; }
+[ -d $PKG ] && { echo $PKG already exists; exit 1; }
+[ -f $NAMESRC-$VERSION.$EXT ] || { echo source code not found; exit 1; }
+
+case $EXT in
+  tar.gz ) PKGSRC=$TMP/$(tar tzf $NAMESRC-$VERSION.$EXT | awk -F / '{print $1;exit}');;
+  tar.bz2) PKGSRC=$TMP/$(tar tjf $NAMESRC-$VERSION.$EXT | awk -F / '{print $1;exit}');;
+esac
+
+rm -rf $PKGSRC
+mkdir -p $PKG
+
+case $EXT in
+  tar.gz ) tar xzvf $NAMESRC-$VERSION.$EXT -C $TMP;;
+  tar.bz2) tar xjvf $NAMESRC-$VERSION.$EXT -C $TMP;;
+esac
+
+cd $PKGSRC
+
+CFLAGS=$SLKCFLAGS \
+CXXFLAGS=$SLKCFLAGS \
+./configure \
+  --prefix=$INSTALLDIR \
+  --sysconfdir=/etc/clamav \
+  --with-dbdir=/var/lib/clamav
+
+make $NUMJOBS
+make install DESTDIR=$PKG
+
+cd ${PKG}${INSTALLDIR}
+
+if [ -d man ]; then
+  MANDIR=man
+elif [ -d share/man ]; then
+  MANDIR=share/man
+else
+  MANDIR=
+fi
+
+if [ $MANDIR ]; then
+  find $MANDIR -type d -name "man[1-9n]" | while read; do
+    cd ${PKG}${INSTALLDIR}/$REPLY
+    find . -type f -exec gzip -9 {} \;
+    find . -type l | while read; do
+      ln -s $(readlink $REPLY).gz $REPLY.gz
+      rm $REPLY
+    done
+  done
+fi
+
+if [ -d info ]; then
+  [ $INSTALLDIR == /usr ] && rm -f info/dir
+  find info -type f ! -name "dir" -exec gzip -9 {} \;
+fi
+
+cd $PKG
+
+mkdir install
+#    |-----handy-ruler------------------------------------------------------|
+cat > install/slack-desc << EOF
+$NAME: $NAME
+$NAME:
+$NAME: Clam Antivirus is a GPL anti-virus toolkit for UNIX.
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+$NAME:
+EOF
+
+PACKAGING="
+chown -R root:root .
+makepkg -l y -c n $TMP/$NAME-$VERSION-$ARCH-$BUILD.txz
+"
+
+STOP=KO
+
+until [ $STOP == OK ]; do
+  su -c "$PACKAGING" && STOP=OK
+done
